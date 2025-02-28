@@ -1,0 +1,161 @@
+spring:
+  application:
+    name: alarm-jobs
+
+server:
+  port: 8085
+
+ddps:
+  kafka:
+    bootstrap-servers: 192.168.3.48:30092
+    auto-offset-reset: earliest
+    fetch-max-bytes: 7340032
+    auto-create-topics: true
+    alarm-group-id: test5
+    alarm-source-topic: scpc.data_alarm
+    sink-topic: scpc.alarm
+  caffeine:
+    l1-cache-name: caffeine
+    l2-cache-name: redis
+    l1-all-open: true
+    auto-refresh-expire-cache: true
+
+  redis:
+    expire-time: 3000000
+    lock: true
+
+  clickhouse:
+    address: "jdbc:clickhouse://localhost:8123/default"
+    database: ddps
+    table: iot_kv_main
+    username: root
+    password: cljslrl0620
+    commit-batch-size: 1
+    commit-padding: 2000
+    commit-retry-attempts: 3
+    commit-retry-interval: 3000
+    commit-ignore-error: false
+  checkpoint:
+    threshold: 10000 #最大设置1w个告警等级
+  alarm:
+    over-head-times: 1 #连续异常计数超过多少次
+
+
+
+logging:
+  level:
+    root: info
+    # 日志级别指定到包或类
+    com.github.jesse.l2cache: debug
+
+# ======================================================================= #
+# 从1.1.0版本开始，支持不同缓存维度的缓存类型配置（可按需配置）
+# ======================================================================= #
+
+# 二级缓存配置
+# 注：caffeine 不适用于数据量大，并且缓存命中率极低的业务场景，如用户维度的缓存。请慎重选择。
+#这里的配置仅对算法回传结果失败的情况进行配置
+l2cache:
+  config:
+    # Redisson 的yaml配置文件
+    redissonYamlConfig: redisson.yaml
+    # 默认缓存配置
+    defaultConfig:
+      # 是否存储空值，默认true，防止缓存穿透
+      allowNullValues: true
+      # 空值过期时间，单位秒
+      nullValueExpireTimeSeconds: 30
+      # 是否使用一级缓存的过期时间来替换二级缓存的过期时间，默认true，简化缓存配置
+      useL1ReplaceL2ExpireTime: true
+      # 缓存类型
+      cacheType: COMPOSITE
+      # 组合缓存配置
+      composite:
+        # 一级缓存类型
+        l1CacheType: caffeine
+        # 二级缓存类型
+        l2CacheType: redis
+        # 二级缓存是否通过batchPut()来处理缓存数据，默认false
+        l2BatchPut: true
+        # 二级缓存是否通过batchEvict()来处理缓存数据，默认false
+        l2BatchEvict: true
+        # 是否全部启用一级缓存，默认false
+        l1AllOpen: false
+        # 是否手动启用一级缓存，默认false
+        l1Manual: true
+
+      # 一级缓存
+      caffeine:
+        # 创建缓存的默认配置（格式完全与Caffeine配置一致）
+        defaultSpec: initialCapacity=10,maximumSize=2,refreshAfterWrite=30m,softValues,recordStats
+
+      # 二级缓存
+      redis:
+        # 加载数据时，是否加锁，默认false
+        lock: false
+        # 加锁时，true调用tryLock()，false调用lock()
+        tryLock: true
+        # 批量操作的大小，可以理解为是分页，默认50
+        batchPageSize: 3
+        # 默认缓存过期时间(ms)
+        expireTime: 86400000
+        # 针对cacheName维度的过期时间集合，单位ms
+        expireTimeCacheNameMap:
+          brandCache: 86400000
+    # 缓存配置集合（针对cacheName的个性化缓存配置），按需配置
+    configMap:
+      # 样例：指定某个缓存维度走caffeine
+      brandCache:
+        # 缓存类型
+        cacheType: caffeine
+        # 一级缓存
+        caffeine:
+          # 创建缓存的默认配置
+          defaultSpec: initialCapacity=10,maximumSize=2,refreshAfterWrite=30m,softValues,recordStats
+      # 样例：指定某个缓存维度走redis
+      goodsPriceRevisionCache:
+        # 缓存类型
+        cacheType: redis
+        # 二级缓存
+        redis:
+          # 加载数据时，是否加锁
+          lock: false
+          # 加锁时，true调用tryLock()，false调用lock()
+          tryLock: true
+          # 批量操作的大小，可以理解为是分页
+          batchPageSize: 3
+          # 默认缓存过期时间(ms)
+          expireTime: 86400000
+          # 针对cacheName维度的过期时间集合，单位ms
+          expireTimeCacheNameMap:
+            brandCache: 86400000
+    # 缓存同步策略配置
+    cacheSyncPolicy:
+      # 策略类型 kafka / redis，推荐使用redis
+      type: redis
+      # 缓存更新时通知其他节点的topic名称
+      topic: l2cache
+    #    hotkey:
+    #      # 热key探测类型,支持 none、jd、sentinel，目前 sentinel 仅支持单机，默认为 none，不启用热key探测。
+    #      type: sentinel
+    #      sentinel:
+    #        # 若配置了默认规则，针对所有的cacheName，生成其默认的热点参数规则，简化配置
+    #        # 若未配置默认规则，则仅针对 rules 中的配置进行热点参数探测
+    #        # 注：规则具体的配置是针对ParamFlowRule的配置
+    #        default-rule:
+    #          grade: 1
+    #          param-idx: 0
+    #          count: 6
+    #          durationInSec: 1
+    #        rules:
+    #          # 案例1
+    #          # resourceName 资源名称，通常设置为缓存名称
+    #          - resource: pointDataCache
+    #            # 流量控制的阈值类型，0表示线程数，1表示qps，默认1
+    #            grade: 1
+    #            # 参数下标
+    #            paramIdx: 0
+    #            # 阈值计数
+    #            count: 3
+    #            # 统计窗口时间长度（单位为秒），默认为1
+    #            durationInSec: 5
